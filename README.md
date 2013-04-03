@@ -52,7 +52,7 @@ structures you will use a lot to write a plugin:
   A `TwitterStream` object also has an `OAuth` object in it, which is
   require to make signed requests to Twitter.  You can acquire the
   Twitter screen name associated with FityBot from variable
-  `TwitterStream.OAuth.UserID`.
+  `TwitterStream.Auth.UserID`.
 
 Now back to plugins.  FityBot is interested in three kinds of
 functions in a plugin:
@@ -66,12 +66,9 @@ set of arguments.  A tweet hook should accept four arguments:
 
   1. A `TwitterStream` object.  You can use it to post tweets or reply
   to a tweet.
-
   2. The screen name (string) that posted the tweet which triggered
   this hook.
-  
   3. The content of the tweet (string) which triggered this hook.
-  
   4. The tweet (map) that triggered this hook.
   
 ### Mention hooks
@@ -79,18 +76,24 @@ set of arguments.  A tweet hook should accept four arguments:
 Mentions hooks are functions with name `onMention`.  You can change
 this name in `config.py`.  They are like tweet hooks, but only trigger
 when FityBot is mentioned in its timeline.  The arguments of a mention
-hook is the same as of a tweet hook.
+hook are the same as of a tweet hook.
 
 ### Commands
 
 A command is represented by a function whose name starts with `cmd`.
 You can change this prefix in `config.py`.  The part in the function
 name after `cmd` is the name of the command.  A command is triggered
-when FityBot receives a tweet whose content starts with `` ` `` (a
-backtick) follow by a command name.  The rest of the tweet is treated
-as the parameter of the command.  FityBot will then call the function
-associated with the command, and feed the function with four
-arguments:
+when FityBot receives a tweet whose content satisfies the following
+criteria
+
+  - It starts with the screen name (with the @) associated with
+  FityBot.
+  - A space should follow, and then a `` ` `` (a backtick) follow by a
+  command name.  This symbol can be changed in `config.py`.
+
+The rest of the tweet is treated as the parameter of the command.
+FityBot will then call the function associated with the command, and
+feed the function with four arguments:
 
   1. A `TwitterStream` object.
   2. The screen name (string) that posted the tweet which triggered
@@ -104,7 +107,12 @@ Note that command names are *case-insensitive*.
 
 ## Some Remarks
 
-I couldn’t find any decent OAuth module for Python, so I write my own.
+FityBot uses the Twitter streaming API to listen to the timeline.  So
+any reaction to incoming tweets is (almost) in real time.
+
+I couldn’t find any decent OAuth module for Python, so I wrote my
+own.  Fortunately documentation on this matter on the Twitter website
+is in good detail.
 
 I wanted to use httplib in Python to send all the non-stream requests,
 but apparently there are some bug in the Twitter API.  Twitter always
