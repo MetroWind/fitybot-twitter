@@ -169,7 +169,7 @@ class OAuth(object):
             # Getting the reason message from the header...
             RespStatus = RespHeader.getvalue().splitlines()[0]
             HttpMsg = ""
-            M = re.match(r'HTTP\/\S*\s*\d+\s*(.*?)\s*$', status_line)
+            M = re.match(r'HTTP\/\S*\s*\d+\s*(.*?)\s*$', RespStatus)
             if M:
                 HttpMsg = M.groups(1)
             raise RuntimeError("{} {}\n{}".format(AuthConn.getinfo(pycurl.HTTP_CODE),
