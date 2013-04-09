@@ -172,7 +172,7 @@ class OAuth(object):
             M = re.match(r'HTTP\/\S*\s*\d+\s*(.*?)\s*$', RespStatus)
             if M:
                 HttpMsg = M.groups(1)
-            raise RuntimeError("{} {}\n{}".format(AuthConn.getinfo(pycurl.HTTP_CODE),
+            raise RuntimeError("{0} {1}\n{2}".format(AuthConn.getinfo(pycurl.HTTP_CODE),
                                                   HttpMsg, Body))
         return Body
 
@@ -198,7 +198,7 @@ class OAuth(object):
         if self.TokenSecret:
             # ... and the token secret.
             HashKey += self.TokenSecret
-        Logger.debug("Signing with hashkey {}...".format(HashKey))
+        Logger.debug("Signing with hashkey {0}...".format(HashKey))
         SigBaseStr = self.genSigBaseStr(method, base_url, OAuthParams, url_params, body_params)
         Logger.debug("Signature base string: " + SigBaseStr)
         # Hash the base string!
@@ -240,8 +240,8 @@ class OAuth(object):
         if not Token["oauth_callback_confirmed"] == "true":
             raise RuntimeError("Failed to acquire request token.")
 
-        Logger.debug("Got request token {}.".format(Token["oauth_token"]))
-        Logger.debug("Got token secret {}.".format(Token["oauth_token_secret"]))
+        Logger.debug("Got request token {0}.".format(Token["oauth_token"]))
+        Logger.debug("Got token secret {0}.".format(Token["oauth_token_secret"]))
         Pin = None
         if callback_url == "oob":
             print "Get PIN from here:"
@@ -343,7 +343,7 @@ class TwitterStream(object):
         FromID = in_reply_to["user"]["screen_name"]
         self.Auth.request("POST", "api.twitter.com", "/1.1/statuses/update.json",
                           body_params={"in_reply_to_status_id": str(in_reply_to["id"]),
-                                      "status": u"@{} {}".format(FromID, msg)})
+                                      "status": u"@{0} {1}".format(FromID, msg)})
     def post(self, msg):
         self.Auth.request("POST", "api.twitter.com", "/1.1/statuses/update.json",
                           body_params={"status": msg})
@@ -393,11 +393,11 @@ class TwitterStream(object):
                             Command, _, Args = MainText[len(self.Config.CmdPrefix):
                                                         ].partition(' ')
                             if Command in self.Commands:
-                                Logger.info(u"{} issued command {} with argument '{}'."
+                                Logger.info(u"{0} issued command {1} with argument '{2}'."
                                             .format(From, Command, Args))
                                 self.Commands[Command](self, From, Args, Message)
                             else:
-                                self.reply(u"Command not found: {}.".format(Command),
+                                self.reply(u"Command not found: {0}.".format(Command),
                                            Message)
                             return
 
@@ -415,7 +415,7 @@ def main(argv):
 
     import imp
     if not os.path.exists(ConfFileName):
-        Logger.critical("Could not find configuration {}.  "
+        Logger.critical("Could not find configuration {0}.  "
                      "I need it to have the consumer key pair.  "
                      "Exiting...".format(ConfFileName))
         return 1
@@ -450,7 +450,7 @@ def main(argv):
     Cmds = {}                           # A map cmd -> function
     for PluginFile in PluginFiles:
         BaseName = os.path.splitext(os.path.basename(PluginFile))[0]
-        Logger.info("Loading plugin {}...".format(BaseName))
+        Logger.info("Loading plugin {0}...".format(BaseName))
         ModInfo = imp.find_module(BaseName, [PluginDir,])
         Plugin = imp.load_module(BaseName, *ModInfo)
         Functions = dir(Plugin)
@@ -470,7 +470,7 @@ def main(argv):
                 # Found a command.  We don't care the case of the
                 # command name.
                 Command = Func[len(CmdFuncPrefix):].lower()
-                Logger.info("  Found command {}.".format(Command))
+                Logger.info("  Found command {0}.".format(Command))
                 Cmds[Command] = getattr(Plugin, Func)
 
     # Now we are ready to construct the twitter stream.
@@ -482,13 +482,13 @@ def main(argv):
     # Load authentication info from user file
     ConfAuth = ConfigParser.SafeConfigParser()
     if os.path.isfile(ConfFileNameAuth):
-        Logger.debug("Auth config file {} exists, reading...".format(ConfFileNameAuth))
+        Logger.debug("Auth config file {0} exists, reading...".format(ConfFileNameAuth))
         ConfAuth.read([ConfFileNameAuth,])
         Twitter.Auth.Token = ConfAuth.get("Auth", "Token")
         Twitter.Auth.TokenSecret = ConfAuth.get("Auth", "TokenSecret")
         Twitter.Auth.UserID = ConfAuth.get("Auth", "UserID")
     else:
-        Logger.debug("Auth config file {} deos not exsit.")
+        Logger.debug("Auth config file {0} deos not exsit.".format(ConfFileNameAuth))
         Logger.info("You don't have an access token pair.  Getting a new one...")
         Twitter.signIn()
         ConfAuth.add_section("Auth")

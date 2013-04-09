@@ -5,5 +5,5 @@ except ImportError:
         return text
 
 def onTweet(twitter, from_id, text, message):
-    print 'Got tweet from @{}:'.format(colored(from_id, 'green'))
+    print 'Got tweet from @{0}:'.format(colored(from_id, 'green'))
     print "  " + text
