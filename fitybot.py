@@ -17,6 +17,7 @@ import base64
 import logging
 import pprint
 import ConfigParser
+import imp
 
 Logger = logging.getLogger("Main")
 Logger.setLevel(logging.INFO)
@@ -34,11 +35,6 @@ class Defaults:
 CONFIG_NAME = "fitybot-twitter"
 CONF_AUTH_NAME = "auth.ini"
 CONF_NAME = "config.py"
-
-ShouldQuit = False
-def shouldQuit(sig, frame):
-    ShouldQuit = True
-    sys.exit(0)
 
 def dictUnicodeToStr(src, codec="utf-8"):
     """Convert any unicode values in dictionary `src' into strings.
@@ -162,6 +158,7 @@ class OAuth(object):
 
         # Body of the responce as a string
         Body = AuthResp.getvalue()
+        Logger.debug("<--- " + Body)
         if AuthConn.getinfo(pycurl.HTTP_CODE) != 200:
             # The server didn't like our message, or there was some
             # network issues.
@@ -222,7 +219,7 @@ class OAuth(object):
         Data = self.request("POST", "api.twitter.com", "/oauth/access_token", {"oauth_token": req_token},
                             body_params={"oauth_verifier": req_verifier})
         Token = ampSepStrToDict(Data)
-        if not Token["oauth_callback_confirmed"] == "true":
+        if not "oauth_token_secret" in Token:
             raise RuntimeError("Failed to acquire access token.")
         Logger.debug("Got access token:")
         Logger.debug(PP.pformat(Token))
@@ -274,6 +271,8 @@ class TwitterStream(object):
         self.TweetHooks = []
         self.Commands = {}
 
+        self.ShouldClose = False
+
     def setupConnection(self):
         """ Create persistant HTTP connection to Streaming API endpoint using cURL.
         """
@@ -310,7 +309,7 @@ class TwitterStream(object):
         BackoffNetworkError = 0.25
         BackoffHttpError = 5
         BackoffRateLimit = 60
-        while True:
+        while not self.ShouldClose:
             self.setupConnection()
             Logger.info("Listening for tweets...")
             try:
@@ -361,6 +360,9 @@ class TwitterStream(object):
     def onTweet(self, data):
         """ This method is called when data is received through Streaming endpoint.
         """
+        if self.ShouldClose:
+            return -1
+
         self.Buffer += data
         if data.endswith('\r\n') and self.Buffer.strip():
             # complete message received
@@ -406,37 +408,41 @@ class TwitterStream(object):
                         Hook(self, From, Text, Message)
                     return
 
-def main(argv):
+def loadConfig():
     # Look ~/.config/fitybot-twitter for config
     HomeDir = os.environ['HOME']
     ConfDir = os.path.join(HomeDir, ".config", CONFIG_NAME)
     ConfFileNameAuth = os.path.join(ConfDir, CONF_AUTH_NAME)
     ConfFileName = os.path.join(ConfDir, CONF_NAME)
 
-    import imp
     if not os.path.exists(ConfFileName):
         Logger.critical("Could not find configuration {0}.  "
                      "I need it to have the consumer key pair.  "
                      "Exiting...".format(ConfFileName))
-        return 1
+        sys.exit(1)
     ModuleInfo = imp.find_module("config", [ConfDir,])
     Conf = imp.load_module("config", *ModuleInfo)
     Config = TwitterConfig()
+    Config.ConfFileNameAuth = ConfFileNameAuth
     Config.UserAgent = getattr(Conf, "UserAgent", Defaults.UserAgent)
     Config.CmdPrefix = getattr(Conf, "CommandPrefix", Defaults.CmdPrefix)
-    MentionHookName = getattr(Conf, "MentionHookName", Defaults.MentionHookName)
-    TweetHookName = getattr(Conf, "TweetHookName", Defaults.TweetHookName)
-    CmdFuncPrefix = getattr(Conf, "CmdFuncPrefix", Defaults.CmdFuncPrefix)
+    Config.PluginDir = getattr(Conf, "PluginDir", Defaults.PluginDir)
+    Config.MentionHookName = getattr(Conf, "MentionHookName", Defaults.MentionHookName)
+    Config.TweetHookName = getattr(Conf, "TweetHookName", Defaults.TweetHookName)
+    Config.CmdFuncPrefix = getattr(Conf, "CmdFuncPrefix", Defaults.CmdFuncPrefix)
     try:
         Config.ConsumerKey = Conf.ConsumerKey
         Config.ConsumerSecret = Conf.ConsumerSecret
     except AttributeError:
         Logger.critical("Could not find consumer key pair in your configuration.  "
                         "Existing...")
-        return 1
+        sys.exit(1)
 
+    return Config
+
+def loadPlugins(config):
     # Load plugins
-    PluginDir = getattr(Conf, "PluginDir", Defaults.PluginDir)
+    PluginDir = config.PluginDir
     import glob
     # Find all .py files in the plugin dir.
     PluginFiles = glob.glob(os.path.join(PluginDir, "*.py"))
@@ -446,7 +452,7 @@ def main(argv):
     Logger.debug(PP.pformat(PluginFiles))
 
     MentionHooks = []                   # A list of functions
-    TweetHooks = []                     # A list of functions    
+    TweetHooks = []                     # A list of functions
     Cmds = {}                           # A map cmd -> function
     for PluginFile in PluginFiles:
         BaseName = os.path.splitext(os.path.basename(PluginFile))[0]
@@ -455,23 +461,31 @@ def main(argv):
         Plugin = imp.load_module(BaseName, *ModInfo)
         Functions = dir(Plugin)
         # Load mention hooks
-        if hasattr(Plugin, MentionHookName):
+        if hasattr(Plugin, config.MentionHookName):
             # Found a mention hook
             Logger.info("  Found mention hook.")
-            MentionHooks.append(getattr(Plugin, MentionHookName))
+            MentionHooks.append(getattr(Plugin, config.MentionHookName))
         # Load tweet hooks
-        if hasattr(Plugin, TweetHookName):
+        if hasattr(Plugin, config.TweetHookName):
             # Found a mention hook
             Logger.info("  Found tweet hook.")
-            TweetHooks.append(getattr(Plugin, TweetHookName))
+            TweetHooks.append(getattr(Plugin, config.TweetHookName))
         # Load commands
         for Func in Functions:
-            if Func.startswith(CmdFuncPrefix):
+            if Func.startswith(config.CmdFuncPrefix):
                 # Found a command.  We don't care the case of the
                 # command name.
-                Command = Func[len(CmdFuncPrefix):].lower()
+                Command = Func[len(config.CmdFuncPrefix):].lower()
                 Logger.info("  Found command {0}.".format(Command))
                 Cmds[Command] = getattr(Plugin, Func)
+
+    return (TweetHooks, MentionHooks, Cmds)
+
+def initialize(config, tweet_hooks, mention_hooks, cmds):
+    Config = config
+    TweetHooks = tweet_hooks
+    MentionHooks = mention_hooks
+    Cmds = cmds
 
     # Now we are ready to construct the twitter stream.
     Twitter = TwitterStream(Config)
@@ -481,32 +495,53 @@ def main(argv):
 
     # Load authentication info from user file
     ConfAuth = ConfigParser.SafeConfigParser()
-    if os.path.isfile(ConfFileNameAuth):
-        Logger.debug("Auth config file {0} exists, reading...".format(ConfFileNameAuth))
-        ConfAuth.read([ConfFileNameAuth,])
+    if os.path.isfile(Config.ConfFileNameAuth):
+        Logger.debug("Auth config file {0} exists, reading...".format(Config.ConfFileNameAuth))
+        ConfAuth.read([Config.ConfFileNameAuth,])
         Twitter.Auth.Token = ConfAuth.get("Auth", "Token")
         Twitter.Auth.TokenSecret = ConfAuth.get("Auth", "TokenSecret")
         Twitter.Auth.UserID = ConfAuth.get("Auth", "UserID")
     else:
-        Logger.debug("Auth config file {0} deos not exsit.".format(ConfFileNameAuth))
+        Logger.debug("Auth config file {0} deos not exsit.".format(Config.ConfFileNameAuth))
         Logger.info("You don't have an access token pair.  Getting a new one...")
         Twitter.signIn()
         ConfAuth.add_section("Auth")
         ConfAuth.set("Auth", "Token", Twitter.Auth.Token)
         ConfAuth.set("Auth", "TokenSecret", Twitter.Auth.TokenSecret)
         ConfAuth.set("Auth", "UserID", Twitter.Auth.UserID)
-        if not os.path.isdir(ConfDir):
-            os.makedirs(ConfDir)
-        ConfFileAuth = open(ConfFileNameAuth, 'w')
+        ConfFileAuth = open(Config.ConfFileNameAuth, 'w')
         ConfAuth.write(ConfFileAuth)
         ConfFileAuth.close()
-        os.chmod(ConfFileNameAuth, 0600)
+        os.chmod(Config.ConfFileNameAuth, 0600)
 
     Twitter.BaseURL = "https://userstream.twitter.com/1.1/user.json"
     Twitter.Method = "GET"
+    return Twitter
+
+def main(argv):
+    Config = loadConfig()
+
+    TweetHooks, MentionHooks, Cmds = loadPlugins(Config)
+
+    Twitter = initialize(Config, TweetHooks, MentionHooks, Cmds)
+
+    import threading
+    TwitterThread = threading.Thread(target=Twitter.start, name="Twitter-Worker")
+    TwitterThread.daemon = True
+    TwitterThread.start()
+
+    def shouldQuit(sig, frame):
+        Logger.info("Waiting for connection to close...")
+        Twitter.ShouldClose = True
+        time.sleep(1)
+        sys.exit(0)
+
     import signal
     signal.signal(signal.SIGINT, shouldQuit)
-    Twitter.start()
+
+    while True:
+        time.sleep(10)
+
     return 0
 
 if __name__ == "__main__":
